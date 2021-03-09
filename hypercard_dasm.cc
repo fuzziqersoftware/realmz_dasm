@@ -18,6 +18,36 @@ using namespace std;
 
 
 
+Image get_manhole_card_pict(const string& part_text) {
+  static unordered_map<int16_t, Image> picts_cache;
+  if (picts_cache.empty()) {
+    for (const string& item : list_directory("files/the_manhole.picts.out")) {
+      if (!ends_with(item, ".bmp")) {
+        continue;
+      }
+      size_t pict_offset = item.find("_PICT_");
+      int16_t pict_id = strtol(item.c_str() + pict_offset + 6, nullptr, 10);
+      string filename = "files/the_manhole.picts.out/" + item;
+      fprintf(stderr, "[manhole_picts_cache] loading PICT %hd from %s\n",
+          pict_id, filename.c_str());
+      picts_cache.emplace(pict_id, filename.c_str());
+    }
+  }
+
+  int16_t pict_id = stol(part_text, nullptr, 10);
+  try {
+    fprintf(stderr, "[manhole_picts_cache] part_text = \"%s\", pict_id = %hd\n",
+        part_text.c_str(), pict_id);
+    return picts_cache.at(pict_id);
+  } catch (const out_of_range&) {
+    fprintf(stderr, "[manhole_picts_cache] part_text = \"%s\", pict_id = %hd not found\n",
+        part_text.c_str(), pict_id);
+    return Image(512, 342);
+  }
+}
+
+
+
 void print_extra_data(StringReader& r, size_t end_offset, const char* what) {
   size_t offset = r.where();
   if (offset > end_offset) {
@@ -581,7 +611,14 @@ int main(int argc, char* argv[]) {
             out_dir.c_str(), is_card ? "card" : "background", card.header.id);
 
         Image layout_img(card_w, card_h);
-        layout_img.fill_rect(0, 0, card_w, card_h, 0xFF, 0xFF, 0xFF);
+        uint8_t pxcol; // draw white lines/text if over image, black if over white
+        if (card_w == 512 && card_h == 342 && card.part_contents.size() == 1) {
+          layout_img = get_manhole_card_pict(card.part_contents[0].text);
+          pxcol = 0xFF;
+        } else {
+          layout_img.fill_rect(0, 0, card_w, card_h, 0xFF, 0xFF, 0xFF);
+          pxcol = 0x00;
+        }
         auto f = fopen_unique(disassembly_filename, "wt");
         fprintf(f.get(), "-- card: %d from stack: %s\n", card.header.id, filename.c_str());
         fprintf(f.get(), "-- bmap block id: %d\n", card.bmap_block_id);
@@ -598,11 +635,11 @@ int main(int argc, char* argv[]) {
         }
 
         for (const auto& part : card.parts) {
-          layout_img.draw_horizontal_line(part.rect_left, part.rect_right, part.rect_top, 0, 0x00, 0x00, 0x00);
-          layout_img.draw_horizontal_line(part.rect_left, part.rect_right, part.rect_bottom, 0, 0x00, 0x00, 0x00);
-          layout_img.draw_vertical_line(part.rect_left, part.rect_top, part.rect_bottom, 0, 0x00, 0x00, 0x00);
-          layout_img.draw_vertical_line(part.rect_right, part.rect_top, part.rect_bottom, 0, 0x00, 0x00, 0x00);
-          layout_img.draw_text(part.rect_left + 1, part.rect_top + 1, nullptr, nullptr, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, "%hd", part.part_id);
+          layout_img.draw_horizontal_line(part.rect_left, part.rect_right, part.rect_top, 0, pxcol, pxcol, pxcol);
+          layout_img.draw_horizontal_line(part.rect_left, part.rect_right, part.rect_bottom, 0, pxcol, pxcol, pxcol);
+          layout_img.draw_vertical_line(part.rect_left, part.rect_top, part.rect_bottom, 0, pxcol, pxcol, pxcol);
+          layout_img.draw_vertical_line(part.rect_right, part.rect_top, part.rect_bottom, 0, pxcol, pxcol, pxcol);
+          layout_img.draw_text(part.rect_left + 1, part.rect_top + 1, nullptr, nullptr, pxcol, pxcol, pxcol, 0xFF, 0x00, 0x00, 0x00, 0x00, "%hd", part.part_id);
           fprintf(f.get(), "\n\n");
           if (part.type == 0 || part.type > 2) {
             fprintf(f.get(), "-- part %hd (type %hhu)\n", part.part_id, part.type);
